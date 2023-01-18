@@ -7,7 +7,7 @@ import dgl
 import torch
 import torch.nn as nn
 
-from .layers import EquiCoordGraphConv, KLinears
+from .layers import EquiCoordGraphConv, KLinears, EquiCoordGraphConv_Multi
 
 
 class MLP(nn.Module):
@@ -204,6 +204,145 @@ class EGNN(nn.Module):
         feats = self.in_embed(node_feats)
 
         for layer in self.layers:
+            if isinstance(layer, EquiCoordGraphConv):
+                feats, pos = layer(graph, feats, pos, edge_attrs)
+            else:
+                feats = layer(feats)
+
+        return feats, pos
+
+class EGNN_Multi(nn.Module):
+    def __init__(
+        self,
+        in_dim: int,
+        hidden_dim: int,
+        out_dim: int,
+        depth: int,
+        feat_dims: List[int],
+        message_dims: List[int],
+        position_dims: List[int],
+        edge_attributes_dim: int,
+        activation: Callable[[torch.Tensor], torch.Tensor],
+        residual: bool,
+        normalize: bool,
+        tanh: bool,
+        activate_last: bool = False,
+        k_linears: int = 1,
+        use_attention: bool = False,
+        attention_dims: List[int] = None,
+        attention_norm: Callable[[torch.Tensor], torch.Tensor] = None,
+        num_vectors:int = 1,
+    ) -> nn.Module:
+        super().__init__()
+        self.num_vectors = num_vectors
+        self._k_linears = k_linears
+        message_dim = message_dims[-1]
+
+
+
+        hidden_sizes = [hidden_dim for _ in range(depth)]
+        hidden_sizes.append(out_dim)
+
+        self.in_embed = MLP([in_dim, hidden_dim], k_linears=k_linears)
+        self.layers = nn.ModuleList()
+
+        for i, (in_dim_, out_dim_) in enumerate(zip(hidden_sizes, hidden_sizes[:-1])):
+            if i == 0:
+                num_vectors_in = 1
+                num_vectors_out = num_vectors
+            elif i < depth - 1:
+                num_vectors_in = num_vectors
+                num_vectors_out = num_vectors
+            else:
+                num_vectors_in = num_vectors
+                num_vectors_out = 1
+
+            edge_in_dim = (2 * in_dim_) + num_vectors_in + edge_attributes_dim
+            edge_sizes = [edge_in_dim]
+            edge_sizes.extend(message_dims)
+
+            position_sizes = [message_dim]
+            position_sizes.extend(position_dims)
+            position_sizes.append(num_vectors_in * num_vectors_out)
+
+            feat_sizes = [in_dim_ + message_dim]
+            feat_sizes.extend(feat_dims)
+            feat_sizes.append(out_dim_)
+
+            if use_attention:
+                attention_sizes = [message_dim]
+
+                if attention_dims is not None:
+                    attention_sizes.extend(attention_dims)
+
+                attention_sizes.append(1)
+
+            edge_func = MLP(edge_sizes, activation=activation,
+                            activate_last=True, k_linears=k_linears)
+            position_func = MLP(position_sizes, activation=activation,
+                                bias_last=False, k_linears=k_linears)
+            feat_func = MLP(feat_sizes, activation=activation,
+                            k_linears=k_linears)
+
+            if use_attention:
+                if isinstance(attention_norm, nn.Softmax):
+                    attention_activation = nn.LeakyReLU(negative_slope=0.2)
+                    attention_activate_last = True
+                else:
+                    attention_activation = activation
+                    attention_activate_last = False
+
+                attention_func = nn.Sequential(
+                    MLP(
+                        attention_sizes,
+                        activation=attention_activation,
+                        activate_last=attention_activate_last,
+                        k_linears=k_linears,
+                    ),
+                    attention_norm,
+                )
+
+            self.layers.append(EquiCoordGraphConv_Multi(
+                edge_func,
+                position_func,
+                feat_func,
+                attention_func if use_attention else None,
+                residual=residual,
+                normalize=normalize,
+                tanh=tanh,
+                num_vectors_in=num_vectors_in,
+                num_vectors_out=num_vectors_out,
+                last_layer= (i == depth - 1)
+            ))
+
+            if i < depth - 1 or activate_last:
+                self.layers.append(activation)
+
+    @property
+    def num_modes(self) -> int:
+        return self._k_linears
+
+    def forward(
+        self,
+        graph: dgl.DGLGraph,
+        node_feats: torch.Tensor,
+        positions: torch.Tensor,
+        edge_attributes: torch.Tensor = None,
+    ) -> Tuple[torch.Tensor]:
+        pos = positions
+        edge_attrs = edge_attributes
+
+        if self._k_linears != 1:
+            pos = torch.stack([pos for _ in range(self._k_linears)], dim=1)
+
+            if edge_attrs is not None:
+                edge_attrs = torch.stack(
+                    [edge_attrs for _ in range(self._k_linears)], dim=1)
+
+        feats = self.in_embed(node_feats)
+
+        for layer_i, layer in enumerate(self.layers):
+            #print("layer_i: " + str(layer_i))
             if isinstance(layer, EquiCoordGraphConv):
                 feats, pos = layer(graph, feats, pos, edge_attrs)
             else:

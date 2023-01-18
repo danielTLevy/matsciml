@@ -98,7 +98,7 @@ class EquiCoordGraphConv(nn.Module):
         self.normalize = normalize
         self.tanh = tanh
 
-        self._verify()
+        #self._verify()
         self.reset_parameters()
 
     def _verify(self):
@@ -208,6 +208,77 @@ class EquiCoordGraphConv(nn.Module):
             graph.apply_edges(fn.u_sub_v('x', 'x', 'xi-xj'))
             graph.edata['r'] = torch.linalg.norm(graph.edata['xi-xj'],
                                                  dim=-1, keepdim=True)
+
+            if self.normalize and graph.num_nodes() > 1:
+                graph.edata['xi-xj'] = graph.edata['xi-xj'] / (graph.edata['r'] + 10e-2)
+
+            graph.apply_edges(self._edge_message)
+
+            feats = self._feat_update(graph)
+            pos = self._coordinate_update(graph)
+
+
+        return feats, pos
+
+class EquiCoordGraphConv_Multi(EquiCoordGraphConv):
+    def __init__(
+        self,
+        edge_func: nn.Module,
+        position_func: nn.Module,
+        feat_func: nn.Module,
+        attention_func: nn.Module = None,
+        residual: bool = True,
+        normalize: bool = True,
+        tanh: bool = True,
+        num_vectors_in: int = 1,
+        num_vectors_out: int = 1,
+        last_layer: bool = False
+    ) -> nn.Module:
+        super().__init__(edge_func, position_func, feat_func, attention_func, residual, normalize, tanh)
+        self.num_vectors_in = num_vectors_in
+        self.num_vectors_out = num_vectors_out
+        self.last_layer = last_layer
+
+    def _coordinate_update(self, graph: dgl.DGLGraph) -> torch.Tensor:
+        # TODO: modify this function?
+        weight_matrix = self.position_func(graph.edata.pop('mij')).view(-1, self.num_vectors_in, self.num_vectors_out)
+        if self.tanh:
+            weight_matrix = torch.tanh(weight_matrix)
+        # TODO: multiply this properly
+        #graph.edata['(xi-xj)*phi(mij)'] = graph.edata['xi-xj'] * weights
+        if graph.edata['xi-xj'].dim() == 2:
+            graph.edata['xi-xj'] = graph.edata['xi-xj'].unsqueeze(2)
+            graph.ndata['x'] = graph.ndata['x'].unsqueeze(2).repeat(1, 1, self.num_vectors_out)
+        graph.edata['(xi-xj)*phi(mij)'] = torch.einsum('bij,bci->bcj', weight_matrix, graph.edata['xi-xj'])
+
+        graph.update_all(fn.copy_e('(xi-xj)*phi(mij)', 'm'),
+                         fn.sum('m', 'update'))
+        x = graph.ndata['x'] + graph.ndata.pop('update')
+        if self.last_layer:
+            x = x.mean(dim=2, keepdim=False)
+
+        return x
+
+
+    def forward(
+        self,
+        graph: dgl.DGLGraph,
+        node_feats: torch.Tensor,
+        positions: torch.Tensor,
+        edge_attributes: torch.Tensor = None,
+    ) -> Tuple[torch.Tensor]:
+        with graph.local_scope():
+            graph.ndata['h'] = self._columnize(node_feats)
+            graph.ndata['x'] = positions
+
+            if edge_attributes is not None:
+                graph.edata['a'] = edge_attributes
+
+            graph.apply_edges(fn.u_sub_v('x', 'x', 'xi-xj'))
+            graph.edata['r'] = torch.linalg.norm(graph.edata['xi-xj'],
+                                                 dim=1, keepdim=True)
+            if graph.edata['r'].dim() > 2:
+                graph.edata['r'] = graph.edata['r'].squeeze(1)
 
             if self.normalize and graph.num_nodes() > 1:
                 graph.edata['xi-xj'] = graph.edata['xi-xj'] / (graph.edata['r'] + 10e-2)

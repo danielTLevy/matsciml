@@ -9,7 +9,7 @@ import torch.nn as nn
 from dgl.nn.pytorch.glob import AvgPooling, MaxPooling, SumPooling, WeightAndSum
 
 from ocpmodels.models import AbstractEnergyModel
-from ocpmodels.models.dgl.egnn.egnn_model import EGNN, MLP
+from ocpmodels.models.dgl.egnn.egnn_model import EGNN, MLP, EGNN_Multi
 
 
 class PLEGNNBackbone(AbstractEnergyModel):
@@ -43,9 +43,10 @@ class PLEGNNBackbone(AbstractEnergyModel):
         prediction_hidden_dim: int,
         prediction_out_dim: int,
         prediction_activation: str,
+        num_vectors: int,
     ) -> None:
         super().__init__()
-        self.embed = EGNN(
+        self.embed = EGNN_Multi(
             embed_in_dim,
             embed_hidden_dim,
             embed_out_dim,
@@ -62,6 +63,7 @@ class PLEGNNBackbone(AbstractEnergyModel):
             k_linears=embed_k_linears,
             use_attention=embed_use_attention,
             attention_norm=self._get_attention_norm(embed_attention_norm),
+            num_vectors=num_vectors
         )
 
         node_projection_dims = self._get_node_projection_dims(
