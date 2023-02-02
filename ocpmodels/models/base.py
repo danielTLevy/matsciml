@@ -218,6 +218,7 @@ class OCPLitModule(pl.LightningModule):
                 f"{prefix}_{key}",
                 value,
                 on_step=True,
+                on_epoch=True,
                 batch_size=batch_size,
                 prog_bar=True,
             )
@@ -380,6 +381,9 @@ class IS2RELitModule(OCPLitModule):
             energy_loss = energy_loss()
         self.energy_loss = energy_loss
         self.save_hyperparameters(ignore=["gnn", "energy_loss"])
+        print("gnn hparams:")
+        print(gnn.hparams)
+        self.save_hyperparameters(dict(**gnn.hparams))
 
     def _compute_losses(
         self, batch: Dict[str, Union[torch.Tensor, dgl.DGLGraph]], batch_idx: int

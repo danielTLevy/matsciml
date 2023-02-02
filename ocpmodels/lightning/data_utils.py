@@ -102,7 +102,7 @@ class GraphDataModule(pl.LightningDataModule):
         split = self.data_splits.get("train")
         return split.data_loader(
             split,
-            shuffle=False,
+            shuffle=True,
             num_workers=self.num_workers,
             batch_size=self.batch_size,
             collate_fn=self.collate_fn,

@@ -10,7 +10,7 @@ from dgl.nn.pytorch.glob import AvgPooling, MaxPooling, SumPooling, WeightAndSum
 
 from ocpmodels.models import AbstractEnergyModel
 from ocpmodels.models.dgl.egnn.egnn_model import EGNN, MLP, EGNN_Multi
-
+from pytorch_lightning.core.mixins import HyperparametersMixin
 
 class PLEGNNBackbone(AbstractEnergyModel):
     def __init__(
@@ -46,6 +46,7 @@ class PLEGNNBackbone(AbstractEnergyModel):
         num_vectors: int,
     ) -> None:
         super().__init__()
+        self.save_hyperparameters()
         self.embed = EGNN_Multi(
             embed_in_dim,
             embed_hidden_dim,

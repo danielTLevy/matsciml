@@ -7,6 +7,7 @@ from pytorch_lightning.utilities.cli import (
     DATAMODULE_REGISTRY,
     LightningCLI,
 )
+from pytorch_lightning.cli import LightningCLI
 
 from ocpmodels import models
 from ocpmodels.lightning import data_utils
@@ -41,4 +42,4 @@ DATAMODULE_REGISTRY.register_classes(data_utils, pl.LightningDataModule)
 
 
 if __name__ == "__main__":
-    cli = LightningCLI()
+    cli = LightningCLI(save_config_overwrite=True)
